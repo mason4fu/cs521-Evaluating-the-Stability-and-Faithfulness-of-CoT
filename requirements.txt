@@ -1,5 +1,6 @@
-pandas
-scikit-learn
-matplotlib
-textdistance
-python-dotenv
+pandas==2.2.2
+scikit-learn==1.5.1
+matplotlib==3.9.0
+textdistance==4.6.2
+python-dotenv==1.0.1
+google-generativeai==0.7.2
