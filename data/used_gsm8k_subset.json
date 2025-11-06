@@ -1,0 +1,17 @@
+[
+  {
+    "id": "q1",
+    "question": "Thomas wants to throw a party for his best friend Casey. He needs to order enough chairs for all the party guests to sit in, one for each guest. First he orders 3 dozen chairs for 3 dozen guests he invites. Then he finds out that 1/3 of the guests want to bring a guest of their own, so Thomas needs to order more chairs. Eventually, Thomas finds out that 5 of the guests he originally invited can't make it. Thomas would also like to order 12 extra chairs just in case they need them. How many chairs is Thomas going to order for Casey's party?",
+    "answer": "Thomas originally orders chairs for 3 dozen guests, 12 x 3 = 36 guests\nThomas finds out that 1/3 of the guests want to bring a guest of their own, 1/3 of 36 = <<1/3*36=12>>12\nThe 12 guests bring a guest of their own each, 36 guests + 12 guests = <<36+12=48>>48\nThomas finds out that 20 of the guests can't make it, 48 guests - 5 guests = 43\nThomas wants to order an extra 12 chairs, 43 + 12 = <<43+12=55>>55\nThomas will need 55 chairs for the party.\n#### 55"
+  },
+  {
+    "id": "q2",
+    "question": "One of the clubs at Georgia's school was selling carnations for a fundraising event. A carnation costs $0.50.  They also had a special where you could buy one dozen carnations for $4.00.  If Georgia sent a dozen carnations to each of her 5 teachers and bought one carnation for each of her 14 friends, how much money would she spend?",
+    "answer": "She wants to send a dozen carnations that cost $4/dz to each of her 5 teachers, so 4*5 = $<<4*5=20>>20\nShe has 14 friends and she knows a dozen carnations is cheaper than buying 12 single carnations. So 14-12 = <<14-12=2>>2 single carnations are needed\nA single carnation cost $0.50 so 2*.50 = $<<2*.50=1.00>>1.00\nAll total she will spend 20+4+1 = $<<20+4+1=25.00>>25.00 on carnations\n#### 25"
+  },
+  {
+    "id": "q3",
+    "question": "Lucille is painting her room. Two of her walls are 3 meters wide and 2 meters tall. The third wall is 5 meters wide and 2 meters tall. The final wall is 4 meters wide and 2 meters tall. If each can of paint covers 2 square meters, how many cans of paint does Lucille need?",
+    "answer": "For the first set of walls, each wall covers 3 meters wide * 2 meters tall = <<3*2=6>>6 square meters.\nThere are two of these walls, so this becomes a total of 6 meters * 2 walls = <<6*2=12>>12 square meters.\nThe third wall covers 5 meters wide * 2 meters tall = <<5*2=10>>10 square meters.\nThe final wall covers 4 meters wide * 2 meters tall = <<4*2=8>>8 square meters.\nSo in total, the paint needs to cover 12 + 10 + 8 = <<12+10+8=30>>30 metres.\nSince each can covers 2 meters, Lucille needs 30 meters / 2 = <<30/2=15>>15 cans of paint.\n#### 15"
+  }
+]

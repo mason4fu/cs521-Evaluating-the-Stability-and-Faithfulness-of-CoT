@@ -8,6 +8,18 @@ fi
 # optional model name argument
 MODEL_NAME=${MODEL_NAME:-toy}
 export MODEL_NAME
+
+# Check and install requirements
+if [ -f "requirements.txt" ]; then
+  echo "Checking and installing requirements..."
+  pip install -q -r requirements.txt
+  echo "Requirements satisfied."
+else
+  echo "Warning: requirements.txt not found, skipping dependency check."
+fi
+
+echo ""
+
 python src/collect_cot.py
 python src/metrics.py
 python src/visualize.py
