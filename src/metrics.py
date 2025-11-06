@@ -4,6 +4,10 @@ import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import textdistance as td
+import difflib
+
+from sentence_transformers import SentenceTransformer, util
+model_embed = SentenceTransformer('all-MiniLM-L6-v2')
 
 from utils import OUT
 
@@ -23,6 +27,9 @@ def normalize_num(s: str):
     except:
         return s.strip()
 
+def change_rate(a,b):
+    return 1 - difflib.SequenceMatcher(None,a,b).ratio()
+
 def compute_pairwise(df):
     # compare each variant to the "original" for same id
     recs = []
@@ -41,6 +48,15 @@ def compute_pairwise(df):
 
             # TF-IDF cosine (semantic-ish for small demo)
             vect = TfidfVectorizer().fit([base_cot, cot])
+            cos = float(cosine_similarity(
+                vect.transform([base_cot]),
+                vect.transform([cot])
+            )[0,0])
+            A_emb = model_embed.encode(base_cot)
+            B_emb = model_embed.encode(cot)
+            sem_cos = float(util.cos_sim(A_emb,B_emb))
+            
+            chg = change_rate(base_cot, cot)
             A = vect.transform([base_cot])
             B = vect.transform([cot])
             cos = float(cosine_similarity(A, B)[0,0])
@@ -55,9 +71,12 @@ def compute_pairwise(df):
                 "variant": var,
                 "cosine_tfidf": round(cos, 4),
                 "edit_sim": round(lev, 4),
+                "cosine_embed": round(sem_cos,4),
+                "change_rate": round(chg,4),
                 "answer": ans,
                 "gold": gold,
-                "is_correct": int(correct)
+                "is_correct": int(correct),
+                "model": row.get("model","unknown")
             })
     return pd.DataFrame(recs)
 
