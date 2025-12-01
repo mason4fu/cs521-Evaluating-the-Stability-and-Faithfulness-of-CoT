@@ -3,10 +3,11 @@ scikit-learn==1.5.1
 matplotlib==3.9.0
 textdistance==4.6.2
 python-dotenv==1.0.1
-google-generativeai==0.7.2
 sentence-transformers==3.0.1
 torch>=2.1.0
 transformers>=4.41.0
-openai>=1.3.7
+accelerate>=1.12.0
 tqdm>=4.66.1
 datasets
+nltk>=3.8.1
+numpy>=1.24.0

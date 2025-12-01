@@ -1,6 +1,7 @@
 .env
 .idea/
 .venv/
-outputs/
-outputs/*
-figures/
+
+# Ignore all markdown files except README.md
+*.md
+!README.md
