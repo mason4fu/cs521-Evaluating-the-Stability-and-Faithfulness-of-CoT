@@ -5,3 +5,16 @@
 # Ignore all markdown files except README.md
 *.md
 !README.md
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Log files
+*.log
+
+# Backup directories
+outputs/backup_*/

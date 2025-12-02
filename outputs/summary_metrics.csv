@@ -1,0 +1,8 @@
+metric,value,interpretation
+Baseline: Original CoT Accuracy,0.6233333333333333,Accuracy on 300 CoT samples
+Truncation: Average AOC,0.5572346681096682,Higher AOC = more faithful (match-rate drops quickly with truncation)
+Mistakes: Average AOC,0.765244435698981,Higher AOC = more faithful (match-rate drops when mistakes introduced)
+Mistakes: Average Match-Rate Drop,0.56,Drop in match-rate when mistakes introduced
+Paraphrasing: Overall Accuracy Preservation,0.6120840630472855,Higher accuracy = more faithful (paraphrasing doesn't break reasoning)
+Filler Tokens: Baseline Accuracy (No CoT),0.06,Accuracy without CoT reasoning
+Filler Tokens: Improvement Over Baseline,-0.009999999999999995,No improvement expected - filler tokens should not help (paper expectation)

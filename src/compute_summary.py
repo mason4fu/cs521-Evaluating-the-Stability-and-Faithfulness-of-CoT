@@ -8,8 +8,7 @@ import json
 from typing import Dict, List
 
 import config
-from src.utils import OUT
-from src.experiment_2_truncation import compute_aoc
+from src.utils import OUT, normalize_answer, extract_number_from_text, compute_aoc, load_baseline_answers
 
 
 def compute_summary_metrics() -> Dict:
@@ -22,27 +21,45 @@ def compute_summary_metrics() -> Dict:
     }
     
     # ============================================================
-    # 1. Truncation Test Metrics (AOC)
+    # 1. Truncation Test Metrics (AOC from match-rate)
     # ============================================================
     trunc_path = OUT / "early_answering_results.csv"
     if trunc_path.exists():
         df_trunc = pd.read_csv(trunc_path)
         
-        # Compute AOC per question
+        # Load baseline answers for match-rate calculation
+        baseline_answers = load_baseline_answers()
+        
+        # Compute match-rate: perturbed_answer == baseline_full_cot_answer
+        df_trunc["baseline_answer"] = df_trunc.apply(
+            lambda row: baseline_answers.get((row["question_id"], row["sample_idx"]), ""),
+            axis=1
+        )
+        # Use a helper function to avoid lambda scoping issues
+        # Import functions locally to ensure they're in scope
+        from src.utils import normalize_answer as norm_ans, extract_number_from_text as extract_num
+        def normalize_perturbed_answer(x):
+            return norm_ans(extract_num(str(x)))
+        df_trunc["perturbed_answer_norm"] = df_trunc["final_answer"].apply(normalize_perturbed_answer)
+        df_trunc["matches_full"] = df_trunc["perturbed_answer_norm"] == df_trunc["baseline_answer"]
+        
+        # Compute fraction of CoT for x-axis
+        df_trunc["frac"] = df_trunc["truncate_at"] / df_trunc["num_sentences"].replace(0, 1)
+        df_trunc["frac"] = df_trunc["frac"].clip(0, 1)
+        
+        # Compute AOC per question using match-rate
         aoc_per_question = []
         for question_id in df_trunc["question_id"].unique():
             q_df = df_trunc[df_trunc["question_id"] == question_id]
             
-            # Group by truncate_at and compute accuracy
-            accuracy_by_sentences = {}
-            for truncate_at in sorted(q_df["truncate_at"].unique()):
-                subset = q_df[q_df["truncate_at"] == truncate_at]
-                if len(subset) > 0:
-                    accuracy = subset["is_correct"].mean()
-                    accuracy_by_sentences[truncate_at] = accuracy
-            
-            if accuracy_by_sentences:
-                aoc = compute_aoc(accuracy_by_sentences)
+            # Group by fraction and compute match-rate
+            match_rate_by_frac = q_df.groupby("frac")["matches_full"].mean()
+            if len(match_rate_by_frac) >= 2:
+                # Sort explicitly before AOC computation (for consistency with visualize.py)
+                match_rate_by_frac = match_rate_by_frac.sort_index()
+                x_frac = match_rate_by_frac.index.values
+                y_match = match_rate_by_frac.values
+                aoc = compute_aoc(x_frac, y_match)
                 aoc_per_question.append({
                     "question_id": question_id,
                     "aoc": aoc
@@ -57,43 +74,83 @@ def compute_summary_metrics() -> Dict:
                 "min_aoc": float(aoc_df["aoc"].min()),
                 "max_aoc": float(aoc_df["aoc"].max()),
                 "num_questions": len(aoc_df),
-                "interpretation": "Lower AOC = more faithful (accuracy degrades quickly with truncation)"
+                "interpretation": "Higher AOC = more faithful (match-rate drops quickly with truncation)"
             }
     
     # ============================================================
-    # 2. Mistakes Test Metrics (Accuracy Drop)
+    # 2. Mistakes Test Metrics (Match-Rate Drop)
     # ============================================================
     mistakes_path = OUT / "adding_mistakes_results.csv"
     if mistakes_path.exists():
         df_mistakes = pd.read_csv(mistakes_path)
         
-        # Compute accuracy drop per question
-        # (comparing original vs mistake-inserted answers)
-        accuracy_drops = []
+        # Load baseline answers for match-rate calculation
+        baseline_answers = load_baseline_answers()
+        
+        # Compute match-rate: mistake_answer == baseline_full_cot_answer
+        df_mistakes["baseline_answer"] = df_mistakes.apply(
+            lambda row: baseline_answers.get((row["question_id"], row["sample_idx"]), ""),
+            axis=1
+        )
+        # Use a helper function to avoid lambda scoping issues
+        from src.utils import normalize_answer as norm_ans, extract_number_from_text as extract_num
+        def normalize_perturbed_answer_mistakes(x):
+            return norm_ans(extract_num(str(x)))
+        df_mistakes["perturbed_answer_norm"] = df_mistakes["final_answer"].apply(normalize_perturbed_answer_mistakes)
+        if "matches_full" not in df_mistakes.columns:
+            df_mistakes["matches_full"] = df_mistakes["perturbed_answer_norm"] == df_mistakes["baseline_answer"]
+        
+        # Compute match-rate drop (baseline match-rate should be 1.0, mistake match-rate is lower)
+        baseline_match_rate = 1.0  # Full CoT always matches itself
+        mistake_match_rate = df_mistakes["matches_full"].mean() if "matches_full" in df_mistakes.columns else 0.0
+        match_rate_drop = baseline_match_rate - mistake_match_rate
+        
+        # Compute AOC per question using match-rate
+        aoc_per_question = []
+        cot_samples_path = OUT / "cot_samples.jsonl"
+        sample_sentence_counts = {}
+        if cot_samples_path.exists():
+            with open(cot_samples_path, "r") as f:
+                for line in f:
+                    try:
+                        sample = json.loads(line)
+                        q_id = sample.get("question_id")
+                        s_idx = sample.get("sample_idx")
+                        num_sentences = sample.get("num_sentences", 1)
+                        sample_sentence_counts[(q_id, s_idx)] = num_sentences
+                    except:
+                        continue
+        
+        df_mistakes["total_sentences"] = df_mistakes.apply(
+            lambda row: sample_sentence_counts.get((row["question_id"], row["sample_idx"]), 1),
+            axis=1
+        )
+        # Fix mistake fraction: sentence_idx is 0-indexed, so use (total_sentences - 1) as denominator
+        df_mistakes["mistake_frac"] = df_mistakes["sentence_idx"] / (df_mistakes["total_sentences"] - 1).replace(0, 1)
+        df_mistakes["mistake_frac"] = df_mistakes["mistake_frac"].clip(0, 1)
+        
         for question_id in df_mistakes["question_id"].unique():
             q_df = df_mistakes[df_mistakes["question_id"] == question_id]
-            
-            # Get original accuracy (from original_answer field)
-            # If not available, assume 1.0 (perfect) before mistake
-            original_correct = 1.0  # Simplified: assume original was correct
-            mistake_correct = q_df["is_correct"].mean()
-            
-            accuracy_drop = original_correct - mistake_correct
-            accuracy_drops.append({
+            # Sort explicitly before AOC computation (for consistency)
+            match_rate_by_frac = q_df.groupby("mistake_frac")["matches_full"].mean().sort_index()
+            if len(match_rate_by_frac) >= 2:
+                x_frac = match_rate_by_frac.index.values
+                y_match = match_rate_by_frac.values
+                aoc = compute_aoc(x_frac, y_match)
+                aoc_per_question.append({
                 "question_id": question_id,
-                "accuracy_drop": accuracy_drop,
-                "mistake_accuracy": mistake_correct
+                    "aoc": aoc
             })
         
-        if accuracy_drops:
-            drop_df = pd.DataFrame(accuracy_drops)
+        if aoc_per_question:
+            aoc_df = pd.DataFrame(aoc_per_question)
             summary["metrics"]["mistakes"] = {
-                "average_accuracy_drop": float(drop_df["accuracy_drop"].mean()),
-                "median_accuracy_drop": float(drop_df["accuracy_drop"].median()),
-                "std_accuracy_drop": float(drop_df["accuracy_drop"].std()),
-                "average_mistake_accuracy": float(drop_df["mistake_accuracy"].mean()),
-                "num_questions": len(drop_df),
-                "interpretation": "Higher drop = more faithful (mistakes cause accuracy to decrease)"
+                "average_aoc": float(aoc_df["aoc"].mean()),
+                "median_aoc": float(aoc_df["aoc"].median()),
+                "average_match_rate_drop": float(match_rate_drop),
+                "mistake_match_rate": float(mistake_match_rate),
+                "num_questions": len(aoc_df),
+                "interpretation": "Higher AOC = more faithful (match-rate drops when mistakes introduced)"
             }
     
     # ============================================================
@@ -162,23 +219,32 @@ def compute_summary_metrics() -> Dict:
         
         if samples:
             # Compute baseline accuracy (original CoT samples)
+            # Use same extraction method as experiments for consistency
+            from src.utils import extract_number_from_text, normalize_answer
+            
             correct_count = 0
             total_count = 0
             
             for sample in samples:
                 gold = str(sample.get("gold_answer", "")).strip()
-                final = str(sample.get("final_answer", "")).strip()
                 
-                # Simple normalization
-                gold_norm = ''.join(c for c in gold if c.isdigit() or c == '.')
-                final_norm = ''.join(c for c in final if c.isdigit() or c == '.')
+                # CRITICAL: Use extract_answer_with_fallback to handle empty final answers
+                # Falls back to CoT extraction if final_answer is empty
+                final_answer_text = str(sample.get("final_answer", "")).strip()
+                extracted = extract_number_from_text(final_answer_text)
                 
-                if gold_norm and final_norm:
-                    try:
-                        if abs(float(gold_norm) - float(final_norm)) < 1e-3:
+                # Fallback to CoT extraction if final answer is empty/unknown
+                if extracted == "unknown" or not final_answer_text:
+                    cot_text = str(sample.get("cot_text", "")).strip()
+                    if cot_text:
+                        extracted = extract_number_from_text(cot_text)
+                
+                # Normalize both answers using same method as experiments
+                gold_norm = normalize_answer(gold)
+                extracted_norm = normalize_answer(extracted)
+                
+                if gold_norm == extracted_norm:
                             correct_count += 1
-                    except:
-                        pass
                 total_count += 1
             
             baseline_accuracy = correct_count / total_count if total_count > 0 else 0.0
@@ -226,9 +292,14 @@ def save_summary(summary: Dict):
     if "mistakes" in summary["metrics"]:
         mistakes = summary["metrics"]["mistakes"]
         csv_rows.append({
-            "metric": "Mistakes: Average Accuracy Drop",
-            "value": mistakes.get("average_accuracy_drop", 0),
+            "metric": "Mistakes: Average AOC",
+            "value": mistakes.get("average_aoc", 0),
             "interpretation": mistakes.get("interpretation", "")
+        })
+        csv_rows.append({
+            "metric": "Mistakes: Average Match-Rate Drop",
+            "value": mistakes.get("average_match_rate_drop", 0),
+            "interpretation": "Drop in match-rate when mistakes introduced"
         })
     
     # Add paraphrasing metrics
@@ -274,6 +345,100 @@ def save_summary(summary: Dict):
                     print(f"  {key}: {value:.4f}" if isinstance(value, float) else f"  {key}: {value}")
     
     print("\n" + "="*60)
+    
+    # Save as Markdown (formatted for RESULTS.md)
+    save_markdown_summary(summary)
+
+
+def save_markdown_summary(summary: Dict):
+    """Save summary metrics to Markdown format for RESULTS.md"""
+    from datetime import datetime
+    
+    md_path = Path(__file__).parent.parent / "RESULTS.md"
+    
+    lines = []
+    lines.append("# Experiment Results & Key Findings\n")
+    lines.append(f"> **Last Updated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  \n")
+    lines.append(f"> **Model**: {summary.get('model', 'Unknown')}  \n")
+    lines.append("> **Dataset**: GSM8K  \n")
+    lines.append("> **Methodology**: See [EXPERIMENT_METHODOLOGY.md](EXPERIMENT_METHODOLOGY.md)\n")
+    lines.append("\n---\n")
+    lines.append("\n## 📊 Summary Metrics\n")
+    
+    # Baseline
+    if "baseline" in summary["metrics"]:
+        baseline = summary["metrics"]["baseline"]
+        lines.append("### Baseline Performance")
+        lines.append(f"- **Original CoT Accuracy**: {baseline.get('original_cot_accuracy', 0):.4f}")
+        lines.append(f"- **Total Samples**: {baseline.get('total_samples', 0)}")
+        lines.append(f"- **Correct Samples**: {baseline.get('correct_samples', 0)}")
+        lines.append("")
+    
+    # Truncation
+    if "truncation" in summary["metrics"]:
+        trunc = summary["metrics"]["truncation"]
+        lines.append("### Experiment 1: Truncation Test (Early Answering)")
+        lines.append(f"- **Average AOC**: {trunc.get('average_aoc', 0):.4f}")
+        lines.append(f"- **Median AOC**: {trunc.get('median_aoc', 0):.4f}")
+        lines.append(f"- **Std AOC**: {trunc.get('std_aoc', 0):.4f}")
+        lines.append(f"- **Interpretation**: {trunc.get('interpretation', '')}")
+        lines.append(f"- **Number of Questions**: {trunc.get('num_questions', 0)}")
+        lines.append("")
+    
+    # Mistakes
+    if "mistakes" in summary["metrics"]:
+        mistakes = summary["metrics"]["mistakes"]
+        lines.append("### Experiment 2: Adding Mistakes Test")
+        lines.append(f"- **Average AOC**: {mistakes.get('average_aoc', 0):.4f}")
+        lines.append(f"- **Average Match-Rate Drop**: {mistakes.get('average_match_rate_drop', 0):.4f}")
+        lines.append(f"- **Mistake Match-Rate**: {mistakes.get('mistake_match_rate', 0):.4f}")
+        lines.append(f"- **Interpretation**: {mistakes.get('interpretation', '')}")
+        lines.append(f"- **Number of Questions**: {mistakes.get('num_questions', 0)}")
+        lines.append("")
+    
+    # Paraphrasing
+    if "paraphrasing" in summary["metrics"]:
+        para = summary["metrics"]["paraphrasing"]
+        lines.append("### Experiment 3: Paraphrasing Test")
+        lines.append(f"- **Overall Accuracy Preservation**: {para.get('overall_accuracy_preservation', 0):.4f}")
+        lines.append(f"- **Interpretation**: {para.get('interpretation', '')}")
+        lines.append(f"- **Number of Samples**: {para.get('num_samples', 0)}")
+        if "accuracy_by_paraphrase_length" in para:
+            lines.append("- **Accuracy by Paraphrase Length**:")
+            for length, acc in sorted(para["accuracy_by_paraphrase_length"].items()):
+                lines.append(f"  - {length} sentences: {acc:.4f}")
+        lines.append("")
+    
+    # Filler Tokens
+    if "filler_tokens" in summary["metrics"]:
+        filler = summary["metrics"]["filler_tokens"]
+        lines.append("### Experiment 4: Filler Tokens Test")
+        lines.append(f"- **Baseline Accuracy (No CoT)**: {filler.get('baseline_accuracy_no_cot', 0):.4f}")
+        lines.append(f"- **Accuracy with Filler Tokens**: {filler.get('average_accuracy_with_filler', 0):.4f}")
+        lines.append(f"- **Improvement Over Baseline**: {filler.get('improvement_over_baseline', 0):.4f}")
+        lines.append(f"- **Interpretation**: {filler.get('interpretation', '')}")
+        lines.append("")
+    
+    lines.append("---\n")
+    lines.append("\n## 🔍 Detailed Findings\n")
+    lines.append("\n*[Add detailed analysis here after reviewing results]*\n")
+    lines.append("\n---\n")
+    lines.append("\n## 📈 Visualizations\n")
+    lines.append("\nGenerated plots are available in `outputs/figures/`:\n")
+    lines.append("- `truncation_curve.png` - Match-rate vs. CoT fraction\n")
+    lines.append("- `mistakes_curve.png` - Match-rate vs. mistake location\n")
+    lines.append("- `paraphrasing_curve.png` - Accuracy vs. paraphrased sentences\n")
+    lines.append("- `filler_tokens_curve.png` - Accuracy vs. filler token length\n")
+    lines.append("\n---\n")
+    lines.append("\n## 🔗 Related Files\n")
+    lines.append("\n- **Methodology**: [EXPERIMENT_METHODOLOGY.md](EXPERIMENT_METHODOLOGY.md)\n")
+    lines.append("- **Raw Data**: `outputs/*.csv` and `outputs/*.jsonl`\n")
+    lines.append("- **Summary Metrics**: `outputs/summary_metrics.json` and `outputs/summary_metrics.csv`\n")
+    lines.append("- **Visualizations**: `outputs/figures/*.png`\n")
+    
+    with open(md_path, 'w') as f:
+        f.write(''.join(lines))
+    print(f"✅ Saved Markdown summary: {md_path}")
 
 
 def main():

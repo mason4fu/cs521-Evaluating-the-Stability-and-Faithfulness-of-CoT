@@ -6,6 +6,13 @@ set -euo pipefail
 cd ~/cot-stability
 source .venv/bin/activate
 
+# Load .env file if it exists (for HF_TOKEN and other secrets)
+if [ -f .env ]; then
+    set -a
+    source .env
+    set +a
+fi
+
 # Set all paths to volume
 export HF_HOME=/media/volume/cot-llm-storage/hf-cache
 export TRANSFORMERS_CACHE=/media/volume/cot-llm-storage/hf-cache

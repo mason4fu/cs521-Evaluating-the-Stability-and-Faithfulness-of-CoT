@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import config
 from src.utils import (
     extract_gold_answer, sentences_split, append_jsonl,
-    DATA, OUT
+    generate_formatted_jsonl, DATA, OUT
 )
 from src.model_runner import ModelRunner, LocalModelRunner
 
@@ -29,62 +29,72 @@ def generate_cot_sample(
     question_id: str,
     sample_idx: int
 ) -> Dict:
-    """Generate a single CoT sample"""
-    # Create prompt matching paper Table 1
-    # Use a prompt that encourages step-by-step reasoning
-    prompt = config.COT_PROMPT_TEMPLATE.format(question=question)
-    # Don't add final answer prompt yet - let model generate full reasoning
+    """
+    Generate a single CoT sample using TWO-STAGE method (as per paper Table 1).
     
-    # Generate with sampling parameters from paper
-    response = runner.generate(
+    Stage 1: Generate CoT reasoning (limited to 256 tokens, capped at 12 sentences)
+    Stage 2: Ask separately for final answer
+    """
+    # Stage 1: Generate CoT reasoning
+    # Create prompt matching paper Table 1
+    prompt = config.COT_PROMPT_TEMPLATE.format(question=question)
+    
+    # Generate CoT with sampling parameters from paper
+    # Increased to 512 tokens with less aggressive stop sequences to allow longer reasoning
+    # Use higher temperature for CoT diversity
+    cot_response = runner.generate(
         prompt,
-        temperature=config.TEMPERATURE,
+        temperature=config.TEMPERATURE_COT,  # Higher temp for CoT diversity
         top_p=config.NUCLEUS_P,
-        max_tokens=config.MAX_TOKENS,
-        stop=None  # Let it generate full response
+        max_tokens=config.MAX_TOKENS,  # 512 tokens (increased from 256)
+        stop=config.STOP_SEQUENCES_COT  # Less aggressive stops for CoT generation
     )
     
-    # Split into CoT and final answer
-    # Look for "The answer is" or similar patterns
-    response_lower = response.lower()
-    cot_text = response
-    final_answer_text = ""
-    
-    # Try to find answer separator
-    answer_markers = ["the answer is", "answer:", "final answer:", "answer is"]
-    for marker in answer_markers:
-        if marker in response_lower:
-            idx = response_lower.find(marker)
-            cot_text = response[:idx].strip()
-            final_answer_text = response[idx + len(marker):].strip()
-            break
-    
-    # If no marker found, try to extract last number as answer
-    if not final_answer_text:
-        from src.utils import extract_number_from_text as extract_num
-        final_answer_text = extract_num(response)
-        # Assume everything before the number is CoT
-        if final_answer_text != "unknown":
-            # Try to find where the number appears
-            import re
-            numbers = list(re.finditer(r"[-+]?\d*\.?\d+", response))
-            if numbers:
-                last_num_match = numbers[-1]
-                cot_text = response[:last_num_match.start()].strip()
-    
-    # Sentence-split CoT (as in paper)
+    # Split CoT into sentences for analysis
+    cot_text = cot_response
     cot_sentences = sentences_split(cot_text) if cot_text else []
+    
+    # Apply 12-sentence cap (primary limit) - truncate if longer
+    if len(cot_sentences) > config.MAX_COT_SENTENCES:
+        # Reconstruct text from first 12 sentences
+        cot_text = " ".join(cot_sentences[:config.MAX_COT_SENTENCES])
+        cot_sentences = cot_sentences[:config.MAX_COT_SENTENCES]
+    
+    # Skip CoTs that are too short or contain markdown garbage
+    if len(cot_sentences) < 1:
+        return None  # Will be filtered out
+    
+    # Check for markdown garbage
+    if "###" in cot_text or "```" in cot_text:
+        return None  # Skip markdown-heavy CoTs
+    
+    # Stage 2: Ask separately for final answer (as per paper)
+    # Include full CoT in final answer prompt
+    final_answer_prompt = f"{prompt}{cot_text}\n{config.FINAL_ANSWER_PROMPT}"
+    
+    final_answer_response = runner.generate(
+        final_answer_prompt,
+        temperature=config.TEMPERATURE_FINAL_ANSWER,  # Lower temp for final answer consistency
+        top_p=config.NUCLEUS_P,
+        max_tokens=config.MAX_TOKENS_FINAL_ANSWER,  # 12 tokens for concise numeric answers
+        stop=None  # CRITICAL: Remove stop sequences entirely for final-answer generation
+    )
+    
+    # The final answer is from the second response
+    final_answer_text = final_answer_response.strip()
     
     return {
         "question_id": question_id,
         "sample_idx": sample_idx,
         "question": question,
         "prompt": prompt,
-        "full_response": response,
+        "full_response": cot_response,  # Stage 1 response (CoT)
         "cot_text": cot_text,
         "cot_sentences": cot_sentences,
         "num_sentences": len(cot_sentences),
-        "final_answer": final_answer_text,
+        "final_answer": final_answer_text,  # Stage 2 response (final answer)
+        "final_answer_prompt": final_answer_prompt,  # Store the full prompt used for stage 2
+        "final_answer_response": final_answer_response,  # Store the raw response from stage 2
         "timestamp": time.time()
     }
 
@@ -215,7 +225,7 @@ def run_experiment_1(
         def set_current_question(q): pass
         def clear_current_question(): pass
     
-    with tqdm(total=samples_to_generate, desc="Generating CoT samples") as pbar:
+    with tqdm(total=samples_to_generate, desc="Generating CoT samples", mininterval=1.0) as pbar:
         for q_data, missing_samples in questions_to_process:
             # Check stop flag before starting new question
             if get_should_stop():
@@ -250,6 +260,11 @@ def run_experiment_1(
                     sample = generate_cot_sample(
                         runner, question, question_id, sample_idx
                     )
+                    # Skip None samples (filtered out due to quality)
+                    if sample is None:
+                        pbar.update(1)
+                        continue
+                    
                     # Add gold answer info
                     sample["gold_answer"] = q_data["gold_answer"]
                     sample["gold_answer_full"] = q_data["answer"]
@@ -270,9 +285,22 @@ def run_experiment_1(
                 print(f"\n⏸️  Stop requested. Completed question: {question_id}")
                 break
     
+    # Check how many samples were actually generated
+    actual_samples = 0
+    if COT_SAMPLES_PATH.exists():
+        with open(COT_SAMPLES_PATH, "r") as f:
+            actual_samples = sum(1 for line in f if line.strip())
+    
     print(f"\n✅ Experiment 1 complete!")
     print(f"   Results saved to: {COT_SAMPLES_PATH}")
-    print(f"   Total samples: {total_samples}")
+    if samples_to_generate > 0:
+        print(f"   Attempted to generate {samples_to_generate} new samples")
+        print(f"   Successfully generated {actual_samples} samples")
+    
+    # Auto-generate formatted version for readability
+    if COT_SAMPLES_PATH.exists() and actual_samples > 0:
+        formatted_path = generate_formatted_jsonl(COT_SAMPLES_PATH)
+        print(f"   Formatted version saved to: {formatted_path}")
 
 
 if __name__ == "__main__":

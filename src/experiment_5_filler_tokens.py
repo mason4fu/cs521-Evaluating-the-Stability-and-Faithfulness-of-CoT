@@ -55,16 +55,21 @@ def run_filler_tokens_test(
     try:
         response = runner.generate(
             prompt,
-            temperature=config.TEMPERATURE,
+            temperature=config.TEMPERATURE_FINAL_ANSWER,  # Lower temp for final answer consistency
             top_p=config.NUCLEUS_P,
-            max_tokens=config.MAX_TOKENS
+            max_tokens=config.MAX_TOKENS_FINAL_ANSWER,  # 24 tokens for final answer
+            stop=None  # CRITICAL: Remove stop sequences entirely for final-answer generation
         )
         
         # Extract answer
         final_answer = extract_number_from_text(response)
         
+        # Normalize both answers for comparison
+        final_answer_norm = normalize_answer(final_answer)
+        gold_answer_norm = normalize_answer(gold_answer)
+        
         # Check correctness
-        is_correct = normalize_answer(final_answer) == normalize_answer(gold_answer)
+        is_correct = (final_answer_norm == gold_answer_norm)
         
         return {
             "filler_length": filler_length,
@@ -180,11 +185,11 @@ def run_experiment_5(
     all_prompts = []
     prompt_metadata = []
     
-    for q_data in questions:
-        question = q_data["question"]
-        gold_answer = q_data["gold_answer"]
-        
-        if not gold_answer:
+        for q_data in questions:
+            question = q_data["question"]
+            gold_answer = q_data["gold_answer"]
+            
+            if not gold_answer:
             continue
         
         for filler_length in filler_lengths:
@@ -236,7 +241,7 @@ def run_experiment_5(
     
     # Process in batches
     current_question = None
-    with tqdm(total=len(all_prompts), desc="Filler tokens tests") as pbar:
+    with tqdm(total=len(all_prompts), desc="Filler tokens tests", mininterval=1.0) as pbar:
         for batch_start in range(0, len(all_prompts), batch_size):
             # Check stop flag before each batch
             if get_should_stop():
@@ -264,9 +269,10 @@ def run_experiment_5(
                     # Use batch processing
                     responses = runner.batch_generate(
                         batch_prompts,
-                        temperature=config.TEMPERATURE,
+                        temperature=config.TEMPERATURE_FINAL_ANSWER,  # Lower temp for final answer consistency
                         top_p=config.NUCLEUS_P,
-                        max_tokens=config.MAX_TOKENS
+                        max_tokens=config.MAX_TOKENS_FINAL_ANSWER,  # 24 tokens for final answer
+                        stop=None  # CRITICAL: Remove stop sequences entirely for final-answer generation
                     )
                 else:
                     # Fallback to sequential
@@ -274,9 +280,10 @@ def run_experiment_5(
                     for prompt in batch_prompts:
                         response = runner.generate(
                             prompt,
-                            temperature=config.TEMPERATURE,
+                            temperature=config.TEMPERATURE_FINAL_ANSWER,  # Lower temp for final answer consistency
                             top_p=config.NUCLEUS_P,
-                            max_tokens=config.MAX_TOKENS
+                            max_tokens=config.MAX_TOKENS_FINAL_ANSWER,  # 24 tokens for final answer
+                            stop=None  # CRITICAL: Remove stop sequences entirely for final-answer generation
                         )
                         responses.append(response)
                 
@@ -285,7 +292,9 @@ def run_experiment_5(
                     metadata = batch_metadata[i]
                     try:
                         final_answer = extract_number_from_text(response)
-                        is_correct = normalize_answer(final_answer) == normalize_answer(metadata["gold_answer"])
+                        final_answer_norm = normalize_answer(final_answer)
+                        gold_answer_norm = normalize_answer(metadata["gold_answer"])
+                        is_correct = (final_answer_norm == gold_answer_norm)
                         
                         result = {
                             "filler_length": metadata["filler_length"],
@@ -296,16 +305,16 @@ def run_experiment_5(
                             "is_correct": is_correct,
                             "question": metadata["question"]
                         }
-                        all_results.append(result)
-                    except Exception as e:
-                        all_results.append({
+                    all_results.append(result)
+                except Exception as e:
+                    all_results.append({
                             "filler_length": metadata["filler_length"],
                             "question": metadata["question"],
-                            "error": str(e),
-                            "is_correct": False
-                        })
-                    
-                    pbar.update(1)
+                        "error": str(e),
+                        "is_correct": False
+                    })
+                
+                pbar.update(1)
                 
                 # Check stop flag after each batch
                 if get_should_stop():
@@ -323,12 +332,15 @@ def run_experiment_5(
                         
                         response = runner.generate(
                             prompt,
-                            temperature=config.TEMPERATURE,
+                            temperature=config.TEMPERATURE_FINAL_ANSWER,  # Lower temp for final answer consistency
                             top_p=config.NUCLEUS_P,
-                            max_tokens=config.MAX_TOKENS
+                            max_tokens=config.MAX_TOKENS_FINAL_ANSWER,  # 24 tokens for final answer
+                            stop=None  # CRITICAL: Remove stop sequences entirely for final-answer generation
                         )
                         final_answer = extract_number_from_text(response)
-                        is_correct = normalize_answer(final_answer) == normalize_answer(metadata["gold_answer"])
+                        final_answer_norm = normalize_answer(final_answer)
+                        gold_answer_norm = normalize_answer(metadata["gold_answer"])
+                        is_correct = (final_answer_norm == gold_answer_norm)
                         
                         all_results.append({
                             "filler_length": metadata["filler_length"],
@@ -370,10 +382,10 @@ def run_experiment_5(
         print(f"   Added {len(df)} new filler token tests")
         print(f"   Total filler tests: {len(full_df)}")
     else:
-        df.to_csv(FILLER_RESULTS_PATH, index=False)
-        print(f"\n✅ Experiment 5 complete!")
-        print(f"   Results saved to: {FILLER_RESULTS_PATH}")
-        print(f"   Total filler tests: {len(df)}")
+    df.to_csv(FILLER_RESULTS_PATH, index=False)
+    print(f"\n✅ Experiment 5 complete!")
+    print(f"   Results saved to: {FILLER_RESULTS_PATH}")
+    print(f"   Total filler tests: {len(df)}")
     
     # Print summary
     print("\n   Accuracy by filler length (sample):")

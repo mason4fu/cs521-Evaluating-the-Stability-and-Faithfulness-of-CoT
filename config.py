@@ -21,9 +21,43 @@ GSM8K_SEED = 44
 # Number of questions (None = all questions, set via NUM_QUESTIONS env var)
 NUM_QUESTIONS = int(os.getenv("NUM_QUESTIONS")) if os.getenv("NUM_QUESTIONS") else None
 NUM_SAMPLES_PER_QUESTION = int(os.getenv("NUM_SAMPLES", "20"))  # N samples per question (default 20)
-TEMPERATURE = 0.8
+TEMPERATURE_COT = float(os.getenv("TEMPERATURE_COT", "0.8"))  # Higher temp for CoT diversity
+TEMPERATURE_FINAL_ANSWER = float(os.getenv("TEMPERATURE_FINAL_ANSWER", "0.1"))  # Very low temp for final answer consistency
+TEMPERATURE = TEMPERATURE_COT  # Legacy default (backward compatibility)
 NUCLEUS_P = 0.95
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "512"))  # Reduced from 1024 for faster inference
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "512"))  # Backup token cap (512) - primary limit is 12 sentences
+MAX_COT_SENTENCES = int(os.getenv("MAX_COT_SENTENCES", "12"))  # Primary limit: max 12 sentences for CoT
+MAX_TOKENS_DOWNSTREAM = int(os.getenv("MAX_TOKENS_DOWNSTREAM", "128"))  # Shorter for downstream steps (continuations)
+MAX_TOKENS_FINAL_ANSWER = int(os.getenv("MAX_TOKENS_FINAL_ANSWER", "12"))  # Reduced to 12 for very concise numeric answers (GSM8K typically 1-3 tokens)
+
+# Stop sequences for CoT generation (less aggressive to allow longer reasoning)
+STOP_SEQUENCES_COT = [
+    "###",               # markdown hallucination trigger
+    "\nFinal Answer",    # cuts off after structured answer
+    "\nAnswer:",         # stops if model restarts reasoning
+    "\nQuestion:",       # stops if model starts reprinting question
+    # Note: Removed "\n\n" to allow multi-paragraph reasoning
+    # Note: Removed "Given all of the above" to allow natural flow
+]
+
+# Stop sequences for final answer generation (more aggressive to prevent rambling)
+# Optimized for GSM8K numeric answers - stops at common explanation patterns
+STOP_SEQUENCES_FINAL_ANSWER = [
+    "\n",                # newline - stops after single-line numeric answer
+    "\n\n",              # paragraph boundary — stops rambling
+    "###",               # markdown hallucination trigger
+    "\nFinal Answer",    # cuts off after structured answer
+    "\nAnswer:",         # stops if model restarts reasoning
+    "\nQuestion:",       # stops if model starts reprinting question
+    "Therefore",         # stops verbose explanations starting with "Therefore"
+    "So",                # stops verbose explanations starting with "So"
+    "The answer",        # stops if model starts explaining "The answer is..."
+    "This means",        # stops explanatory text
+    "Given all of the above"  # stops when model begins meta-reasoning
+]
+
+# Legacy stop sequences (for backward compatibility, defaults to final answer stops)
+STOP_SEQUENCES = STOP_SEQUENCES_FINAL_ANSWER
 
 # Prompt templates (matching paper Table 1)
 # For instruct models, this will be wrapped in chat template
@@ -33,7 +67,12 @@ Answer: Let's think step by step.
 
 """
 
-FINAL_ANSWER_PROMPT = "\n\nThe answer is"
+# Two-stage prompting (as per paper Table 1)
+# Stage 1: Generate CoT reasoning
+# Stage 2: Ask separately for final answer
+# Optimized for GSM8K: requests concise numeric answer only
+# CRITICAL: Do NOT include CoT in final answer prompt - use short prompt only
+FINAL_ANSWER_PROMPT = "\n\nGiven the above reasoning, provide only the final numeric answer.\n\nRespond with just the number."
 
 # Directories
 ROOT = Path(__file__).resolve().parent

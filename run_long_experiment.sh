@@ -13,6 +13,13 @@ echo "  Detach: Ctrl+B, then D"
 echo "  Reattach: ssh $VM_USER@$VM_HOST && tmux attach -t $SESSION_NAME"
 echo ""
 
+# Load .env file if it exists (for HF_TOKEN and other secrets)
+if [ -f .env ]; then
+    set -a
+    source .env
+    set +a
+fi
+
 # Get experiment configuration from environment or defaults
 NUM_QUESTIONS=${NUM_QUESTIONS:-100}
 NUM_SAMPLES=${NUM_SAMPLES:-3}

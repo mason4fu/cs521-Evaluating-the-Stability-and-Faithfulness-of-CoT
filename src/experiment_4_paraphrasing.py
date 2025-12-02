@@ -50,9 +50,10 @@ def paraphrase_text(runner, text: str) -> str:
         try:
             response = runner.generate(
                 prompt,
-                temperature=config.TEMPERATURE,
+                temperature=config.TEMPERATURE_COT,  # Higher temp for paraphrase diversity
                 top_p=config.NUCLEUS_P,
-                max_tokens=config.MAX_TOKENS // 2
+                max_tokens=config.MAX_TOKENS_DOWNSTREAM,  # 128 tokens
+                stop=config.STOP_SEQUENCES
             )
             return response.strip()
         except Exception as e:
@@ -87,8 +88,8 @@ def run_paraphrasing_test(
     if len(cot_sentences) == 0:
         return None
     
-    # Paraphrase first N sentences (as per paper)
-    # Paper says: first sentence, first 2 sentences, up to full CoT except final step
+    # Paper-consistent: Only test 1, 2, 4, 8 sentences (not entire CoT)
+    # Paraphrase first N sentences
     sentences_to_paraphrase = min(num_sentences_to_paraphrase, len(cot_sentences) - 1)
     
     if sentences_to_paraphrase == 0:
@@ -124,9 +125,9 @@ def run_paraphrasing_test(
         try:
             continuation = runner.generate(
                 prompt,
-                temperature=config.TEMPERATURE,
+                temperature=config.TEMPERATURE_COT,  # Higher temp for continuation diversity
                 top_p=config.NUCLEUS_P,
-                max_tokens=min(config.MAX_TOKENS, 400)  # Limit continuation length
+                max_tokens=config.MAX_TOKENS_DOWNSTREAM  # 128 tokens
             )
             break
         except Exception as e:
@@ -145,9 +146,9 @@ def run_paraphrasing_test(
     if not continuation:
         # Fallback: use remaining sentences as continuation
         continuation = " ".join(remaining_sentences) if remaining_sentences else ""
-    
-    # Append final answer prompt
-    full_prompt_with_answer = prompt + continuation + config.FINAL_ANSWER_PROMPT
+        
+    # Append final answer prompt (proper newline formatting)
+    full_prompt_with_answer = f"{prompt}{continuation}\n{config.FINAL_ANSWER_PROMPT}"
     
     # Truncate if too long
     if len(full_prompt_with_answer) > max_prompt_length:
@@ -156,16 +157,21 @@ def run_paraphrasing_test(
     try:
         final_response = runner.generate(
             full_prompt_with_answer,
-            temperature=config.TEMPERATURE,
+            temperature=config.TEMPERATURE_FINAL_ANSWER,  # Lower temp for final answer consistency
             top_p=config.NUCLEUS_P,
-            max_tokens=100
+            max_tokens=config.MAX_TOKENS_FINAL_ANSWER,  # 24 tokens for final answer
+            stop=None  # CRITICAL: Remove stop sequences entirely for final-answer generation
         )
         
         # Extract answer
         final_answer = extract_number_from_text(final_response)
         
+        # Normalize both answers for comparison
+        final_answer_norm = normalize_answer(final_answer)
+        gold_answer_norm = normalize_answer(gold_answer)
+        
         # Check correctness
-        is_correct = normalize_answer(final_answer) == normalize_answer(gold_answer)
+        is_correct = (final_answer_norm == gold_answer_norm)
         
         return {
             "num_sentences_paraphrased": sentences_to_paraphrase,
@@ -255,7 +261,9 @@ def run_experiment_4(
         # Check if this sample needs processing
         max_to_paraphrase = len(cot_sentences) - 1
         needs_processing = False
-        for num_sentences in [1, 2, max_to_paraphrase]:
+        # Paper-consistent: Only test 1, 2, 4, 8 sentences
+        test_nums = [1, 2, 4, 8]
+        for num_sentences in test_nums:
             if num_sentences > max_to_paraphrase:
                 continue
             key = (sample["question_id"], sample["sample_idx"], num_sentences)
@@ -282,7 +290,7 @@ def run_experiment_4(
         def clear_current_question(): pass
     
     current_q_id = None
-    with tqdm(total=len(samples_to_process), desc="Paraphrasing tests") as pbar:
+    with tqdm(total=len(samples_to_process), desc="Paraphrasing tests", mininterval=1.0) as pbar:
         for sample in samples_to_process:
             # Check stop flag before starting new question
             if get_should_stop():
@@ -300,7 +308,9 @@ def run_experiment_4(
             cot_sentences = sample.get("cot_sentences", [])
             max_to_paraphrase = len(cot_sentences) - 1
             
-            for num_sentences in [1, 2, max_to_paraphrase]:
+            # Paper-consistent: Only test 1, 2, 4, 8 sentences
+            test_nums = [1, 2, 4, 8]
+            for num_sentences in test_nums:
                 if num_sentences > max_to_paraphrase:
                     continue
                 
