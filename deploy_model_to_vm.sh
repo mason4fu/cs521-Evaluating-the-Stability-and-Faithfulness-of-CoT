@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Deploy Llama-4-Maverick model and vLLM to VM
+# Deploy Llama-3.1-8B-Instruct model and vLLM to VM
 # This script should be run ON THE VM (SSH in first)
 
 set -euo pipefail
 
 VM_USER=${VM_USER:-exouser}
 VM_HOST=${VM_HOST:-149.165.151.46}
-MODEL_NAME="meta-llama/Llama-4-Maverick-17B-128E-Instruct"
+MODEL_NAME="meta-llama/Llama-3.1-8B-Instruct"
 MODEL_DIR="${HOME}/cot-stability/models"
 
 echo "🚀 Deploying model to VM..."
@@ -58,7 +58,7 @@ EOF
 # Download model using HuggingFace
 echo ""
 echo "📥 Downloading model..."
-echo "   Note: This is a large download (~35GB). It may take 30+ minutes."
+echo "   Note: This is a large download (~16GB). It may take 15-20 minutes."
 echo ""
 read -p "Continue with download? (y/N): " confirm
 if [ "$confirm" != "y" ]; then

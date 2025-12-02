@@ -18,7 +18,7 @@ from src.model_runner import ModelRunner, LocalModelRunner
 COT_SAMPLES_PATH = OUT / "cot_samples.jsonl"
 PARAPHRASING_RESULTS_PATH = OUT / "paraphrasing_results.csv"
 
-# Paraphrasing prompt (from paper Table 7)
+# Paraphrasing prompt 
 PARAPHRASING_PROMPT = """Paraphrase the following text while keeping the same meaning and mathematical content:
 
 Original: {text}
